@@ -70,7 +70,7 @@ export default function DentalRecordsTable({ records, onEdit }: DentalRecordsTab
     if (porcelainTeethOnly) {
       const hasPorcelain = (rec.plan || []).some((item) => {
         const treatmentVal = (item.treatment || '').toLowerCase();
-        return treatmentVal.includes('răng sứ');
+        return treatmentVal.includes('dental');
       });
       if (!hasPorcelain) return false;
     }
