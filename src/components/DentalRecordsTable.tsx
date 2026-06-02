@@ -12,7 +12,8 @@ import {
   Clock, 
   PhoneCall, 
   MapPin, 
-  CalendarPlus 
+  CalendarPlus,
+  Sparkles
 } from 'lucide-react';
 
 interface DentalRecordsTableProps {
@@ -26,6 +27,7 @@ export default function DentalRecordsTable({ records, onEdit }: DentalRecordsTab
   const [appointmentFilter, setAppointmentFilter] = useState('');
   const [onedayFilter, setOnedayFilter] = useState('');
   const [debtOnly, setDebtOnly] = useState(false);
+  const [porcelainTeethOnly, setPorcelainTeethOnly] = useState(false);
 
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
@@ -64,6 +66,15 @@ export default function DentalRecordsTable({ records, onEdit }: DentalRecordsTab
       if (!hasDebt) return false;
     }
 
+    // 5. Porcelain Teeth ("răng sứ") Filter
+    if (porcelainTeethOnly) {
+      const hasPorcelain = (rec.plan || []).some((item) => {
+        const treatmentVal = (item.treatment || '').toLowerCase();
+        return treatmentVal.includes('răng sứ');
+      });
+      if (!hasPorcelain) return false;
+    }
+
     return true;
   });
 
@@ -82,12 +93,19 @@ export default function DentalRecordsTable({ records, onEdit }: DentalRecordsTab
     setAppointmentFilter('');
     setOnedayFilter('');
     setDebtOnly(false);
+    setPorcelainTeethOnly(false);
     setCurrentPage(1);
   }
 
   // Set debt only filter state
   function toggleDebtFilter() {
     setDebtOnly(!debtOnly);
+    setCurrentPage(1);
+  }
+
+  // Set porcelain teeth filter state
+  function togglePorcelainFilter() {
+    setPorcelainTeethOnly(!porcelainTeethOnly);
     setCurrentPage(1);
   }
 
@@ -188,23 +206,36 @@ export default function DentalRecordsTable({ records, onEdit }: DentalRecordsTab
             <button
               id="filter_debt_toggle_btn"
               onClick={toggleDebtFilter}
-              className={`flex-1 py-2 px-3 rounded-lg border text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1 ${
+              className={`flex-1 py-1 px-1.5 h-[34px] rounded-lg border text-[11px] font-bold transition-all cursor-pointer flex items-center justify-center gap-1 shrink-0 ${
                 debtOnly
                   ? 'bg-rose-50 border-rose-200 text-rose-700'
                   : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
               }`}
             >
-              <AlertTriangle size={14} className={debtOnly ? 'text-rose-600 animate-bounce' : 'text-slate-400'} />
-              <span>Người còn nợ</span>
+              <AlertTriangle size={13} className={debtOnly ? 'text-rose-600 animate-bounce' : 'text-slate-400'} />
+              <span>Còn nợ</span>
+            </button>
+
+            <button
+              id="filter_porcelain_toggle_btn"
+              onClick={togglePorcelainFilter}
+              className={`flex-1 py-1 px-1.5 h-[34px] rounded-lg border text-[11px] font-bold transition-all cursor-pointer flex items-center justify-center gap-1 shrink-0 ${
+                porcelainTeethOnly
+                  ? 'bg-amber-50 border-amber-350 text-amber-800'
+                  : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <Sparkles size={13} className={porcelainTeethOnly ? 'text-amber-500 animate-pulse' : 'text-slate-400'} />
+              <span>Răng sứ</span>
             </button>
 
             <button
               id="reset_filters_btn"
               onClick={handleClearFilters}
-              className="py-2.5 px-3 rounded-lg border border-slate-200 text-slate-500 bg-white hover:text-slate-800 hover:bg-slate-50 transition-colors cursor-pointer"
+              className="py-1 px-2 h-[34px] rounded-lg border border-slate-200 text-slate-500 bg-white hover:text-slate-800 hover:bg-slate-50 transition-colors cursor-pointer flex items-center justify-center shrink-0 w-[34px]"
               title="Bỏ tìm kiếm & đặt lại"
             >
-              <FilterX size={15} />
+              <FilterX size={14} />
             </button>
           </div>
 
