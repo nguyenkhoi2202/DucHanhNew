@@ -1,0 +1,6 @@
+{
+  "name": "Nha Khoa Duc Hanh",
+  "description": "Hệ thống quản lý hồ sơ bệnh nhân nha khoa Nha Khoa Đức Hạnh Bình Thuận với tính năng lưu trữ, thống kê, tạo mã VietQR và đồng bộ đám mây.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
