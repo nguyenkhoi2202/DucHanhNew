@@ -132,6 +132,20 @@ export default function App() {
       const healthRes = await axios.get('/api/health');
       const healthData = healthRes.data;
 
+      // Ensure response is JSON
+      if (typeof healthData === 'string' && (healthData.includes('<!doctype') || healthData.includes('<html'))) {
+        setDbStatus({
+          connected: false,
+          count: 0,
+          database: '',
+          reason: 'HTML_RESPONSE',
+          error: 'Vercel đang chuyển hướng API về trang index.html',
+          help: 'Quy tắc rewrite trong vercel.json cần loại trừ /api.',
+          isVercel: true,
+        });
+        return;
+      }
+
       if (healthData && healthData.connected) {
         setDbStatus({
           connected: true,
