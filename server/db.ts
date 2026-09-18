@@ -8,19 +8,17 @@ declare global {
   var _mongoClientPromise: Promise<MongoClient> | undefined;
 }
 
+const DEFAULT_MONGODB_URI = 'mongodb+srv://khoitn:123@khoitn.el641ab.mongodb.net/duchanh?retryWrites=true&w=majority&appName=khoitn';
+
 export function getMongoUri(): string {
-  if (process.env.MONGODB_URI) {
+  if (process.env.MONGODB_URI && process.env.MONGODB_URI.trim()) {
     return process.env.MONGODB_URI.trim();
   }
-  // If running on Vercel and MONGODB_URI is not set, don't use 127.0.0.1
-  if (process.env.VERCEL) {
-    throw new Error('MISSING_MONGODB_URI: Bạn chưa thêm biến môi trường MONGODB_URI trên Vercel Project Settings!');
-  }
-  return 'mongodb://127.0.0.1:27017/duchanh';
+  return DEFAULT_MONGODB_URI;
 }
 
 export function getDatabaseName(): string {
-  if (process.env.MONGODB_DB_NAME) {
+  if (process.env.MONGODB_DB_NAME && process.env.MONGODB_DB_NAME.trim()) {
     return process.env.MONGODB_DB_NAME.trim();
   }
   return 'duchanh';
@@ -64,15 +62,6 @@ export async function getRecordsCollection(): Promise<Collection> {
 }
 
 export async function checkMongoStatus() {
-  const uri = process.env.MONGODB_URI;
-  if (!uri && process.env.VERCEL) {
-    return {
-      connected: false,
-      reason: 'MISSING_MONGODB_URI',
-      message: 'Chưa cấu hình biến môi trường MONGODB_URI trên Vercel!',
-      help: 'Vào Vercel Dashboard -> Project Settings -> Environment Variables -> Thêm MONGODB_URI',
-    };
-  }
 
   try {
     const db = await getDb();
