@@ -1,4 +1,4 @@
-import { checkMongoStatus } from '../server/db';
+import { checkMongoStatus } from './db';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');

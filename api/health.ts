@@ -1,4 +1,4 @@
-import { checkMongoStatus } from '../server/db';
+import { checkMongoStatus } from './db';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -8,11 +8,20 @@ export default async function handler(req: any, res: any) {
     return res.status(200).end();
   }
 
-  const status = await checkMongoStatus();
-  return res.status(200).json({
-    status: status.connected ? 'ok' : 'error',
-    ...status,
-    isVercel: !!process.env.VERCEL,
-    timestamp: new Date().toISOString(),
-  });
+  try {
+    const status = await checkMongoStatus();
+    return res.status(200).json({
+      status: status.connected ? 'ok' : 'error',
+      ...status,
+      isVercel: true,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    return res.status(200).json({
+      status: 'error',
+      connected: false,
+      error: err.message || 'Lỗi kiểm tra kết nối',
+      isVercel: true,
+    });
+  }
 }

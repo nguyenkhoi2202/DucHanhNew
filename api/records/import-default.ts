@@ -1,4 +1,4 @@
-import { getRecordsCollection } from '../../server/db';
+import { getRecordsCollection } from '../db';
 import defaultRecords from '../../data/defaultRecords.json';
 
 export default async function handler(req: any, res: any) {
