@@ -1,6 +1,6 @@
-import { getRecordsCollection } from '../db';
+const { getRecordsCollection } = require('../_db.js');
 
-export default async function handler(req: any, res: any) {
+module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -11,6 +11,7 @@ export default async function handler(req: any, res: any) {
   try {
     const collection = await getRecordsCollection();
 
+    // GET: Return all records
     if (req.method === 'GET') {
       const records = await collection
         .find({}, { projection: { _id: 0 } })
@@ -19,6 +20,7 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json(records);
     }
 
+    // POST: Create or upsert a single record
     if (req.method === 'POST') {
       const data = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
       if (!data || !data.name) {
@@ -40,14 +42,15 @@ export default async function handler(req: any, res: any) {
       return res.status(201).json({ success: true, data: record });
     }
 
+    // DELETE: Delete all records (reset database)
     if (req.method === 'DELETE') {
       const result = await collection.deleteMany({});
       return res.status(200).json({ success: true, deletedCount: result.deletedCount });
     }
 
     return res.status(405).json({ error: `Method ${req.method} not allowed` });
-  } catch (error: any) {
+  } catch (error) {
     console.error('API /records error:', error);
     return res.status(500).json({ error: error.message || 'Database error' });
   }
-}
+};

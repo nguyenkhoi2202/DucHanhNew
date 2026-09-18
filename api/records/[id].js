@@ -1,6 +1,6 @@
-import { getRecordsCollection } from '../db';
+const { getRecordsCollection } = require('../_db.js');
 
-export default async function handler(req: any, res: any) {
+module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,PUT,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -8,14 +8,16 @@ export default async function handler(req: any, res: any) {
     return res.status(200).end();
   }
 
-  const id = Number(req.query.id);
-  if (!id || isNaN(id)) {
-    return res.status(400).json({ error: 'Valid numeric record ID is required' });
-  }
-
   try {
+    const rawId = req.query.id;
+    const id = Number(rawId);
+    if (!id) {
+      return res.status(400).json({ error: 'Valid record ID is required' });
+    }
+
     const collection = await getRecordsCollection();
 
+    // GET /api/records/:id
     if (req.method === 'GET') {
       const record = await collection.findOne({ id }, { projection: { _id: 0 } });
       if (!record) {
@@ -24,6 +26,7 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json(record);
     }
 
+    // PUT /api/records/:id
     if (req.method === 'PUT') {
       const data = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
       const updateDoc = {
@@ -35,6 +38,7 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json({ success: true, data: updateDoc });
     }
 
+    // DELETE /api/records/:id
     if (req.method === 'DELETE') {
       const result = await collection.deleteOne({ id });
       if (result.deletedCount === 0) {
@@ -44,8 +48,8 @@ export default async function handler(req: any, res: any) {
     }
 
     return res.status(405).json({ error: `Method ${req.method} not allowed` });
-  } catch (error: any) {
-    console.error(`API /records/${id} error:`, error);
+  } catch (error) {
+    console.error('API /records/[id] error:', error);
     return res.status(500).json({ error: error.message || 'Database error' });
   }
-}
+};
