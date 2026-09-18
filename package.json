@@ -2,7 +2,6 @@
   "name": "react-example",
   "private": true,
   "version": "0.0.0",
-  "type": "module",
   "scripts": {
     "dev": "concurrently -n \"VITE,API\" -c \"cyan,green\" \"npm run dev:vite\" \"npm run dev:server\"",
     "dev:vite": "vite --port=3000 --host=0.0.0.0",
