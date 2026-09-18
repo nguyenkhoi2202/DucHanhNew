@@ -1,0 +1,54 @@
+services:
+  # MongoDB Database Container
+  mongo:
+    image: mongo:7.0
+    container_name: duchanh-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: duchanh
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Mongo Express - Giao diện Web trực quan quản lý dữ liệu MongoDB (http://localhost:8081)
+  mongo-express:
+    image: mongo-express:latest
+    container_name: duchanh-mongo-express
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongo
+      ME_CONFIG_MONGODB_PORT: 27017
+      ME_CONFIG_BASICAUTH: "false"
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  # Ứng dụng Nha Khoa Đức Hạnh (Chạy full stack trong Docker)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: duchanh-web-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/duchanh
+      MONGODB_DB_NAME: duchanh
+      PORT: 5001
+      NODE_ENV: production
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+volumes:
+  mongo_data:
+    driver: local

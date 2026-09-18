@@ -28,7 +28,9 @@ import {
   X,
   Lock,
   CloudLightning,
-  QrCode
+  QrCode,
+  Database,
+  CheckCircle2,
 } from 'lucide-react';
 
 export default function App() {
@@ -47,18 +49,25 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingText, setLoadingText] = useState('Đang xử lý...');
 
-  // 5. Cloud Save password modal states
+  // 5. Database Status state
+  const [dbStatus, setDbStatus] = useState<{ connected: boolean; count: number; database: string }>({
+    connected: false,
+    count: 0,
+    database: '',
+  });
+
+  // 6. Cloud/MongoDB Save password modal states
   const [isCloudPassOpen, setIsCloudPassOpen] = useState(false);
   const [cloudPassword, setCloudPassword] = useState('');
   const [cloudPassError, setCloudPassError] = useState(false);
 
-  // 6. VietQR Popup state managers
+  // 7. VietQR Popup state managers
   const [isQRModalOpen, setIsQRModalOpen] = useState(false);
   const [qrImageUrl, setQrImageUrl] = useState('');
   const [qrAmount, setQrAmount] = useState<number>(0);
   const [qrAddInfo, setQrAddInfo] = useState('');
 
-  // 7. Totals analytical dialog state
+  // 8. Totals analytical dialog state
   const [isTotalsOpen, setIsTotalsOpen] = useState(false);
   const [totalsTitle, setTotalsTitle] = useState('');
   const [totalsSum, setTotalsSum] = useState({ cost: 0, paid: 0, remaining: 0 });
@@ -88,7 +97,7 @@ export default function App() {
       }
     }
 
-    // Dental records load
+    // First load from localStorage for instant render
     const storedRecords = localStorage.getItem('dentalRecords');
     if (storedRecords) {
       try {
@@ -97,7 +106,45 @@ export default function App() {
         console.error('Records parse error', e);
       }
     }
+
+    // Then fetch directly from MongoDB
+    fetchRecordsFromMongo();
   }, []);
+
+  // Check DB status and fetch records from MongoDB
+  async function fetchRecordsFromMongo(showSpinner = false) {
+    if (showSpinner) {
+      setIsLoading(true);
+      setLoadingText('Đang kết nối MongoDB...');
+    }
+
+    try {
+      // Check MongoDB Health
+      const healthRes = await axios.get('/api/health');
+      if (healthRes.data && healthRes.data.connected) {
+        setDbStatus({
+          connected: true,
+          count: healthRes.data.recordsCount || 0,
+          database: healthRes.data.database || 'duchanh',
+        });
+      }
+
+      // Fetch records from MongoDB
+      const res = await axios.get('/api/records');
+      if (Array.isArray(res.data) && res.data.length > 0) {
+        setRecords(res.data);
+        localStorage.setItem('dentalRecords', JSON.stringify(res.data));
+        setDbStatus((prev) => ({ ...prev, connected: true, count: res.data.length }));
+      }
+    } catch (err: any) {
+      console.warn('Không thể kết nối đến MongoDB API, dùng dữ liệu bộ nhớ cục bộ:', err.message);
+      setDbStatus({ connected: false, count: 0, database: '' });
+    } finally {
+      if (showSpinner) {
+        setIsLoading(false);
+      }
+    }
+  }
 
   // ==========================================
   // EFFECT 2: Live Clock Update (Runs every second)
@@ -125,10 +172,11 @@ export default function App() {
   function handleLoginSuccess(expireTime: number) {
     const sessionData: SessionInfo = {
       isLoggedIn: true,
-      expireAt: expireTime
+      expireAt: expireTime,
     };
     localStorage.setItem('session', JSON.stringify(sessionData));
     setSession(sessionData);
+    fetchRecordsFromMongo(true);
   }
 
   function handleLogout() {
@@ -137,9 +185,9 @@ export default function App() {
   }
 
   // ==========================================
-  // RECORD CRUD OPERATIONS
+  // RECORD CRUD OPERATIONS (Synced with MongoDB)
   // ==========================================
-  function handleSaveRecord(formData: {
+  async function handleSaveRecord(formData: {
     name: string;
     phone: string;
     address: string;
@@ -159,7 +207,7 @@ export default function App() {
       dob: formData.dob,
       visitDate: formData.visitDate,
       appointment: formData.appointment,
-      plan: formData.plan
+      plan: formData.plan,
     };
 
     if (isEdit) {
@@ -168,9 +216,25 @@ export default function App() {
       updatedRecords.push(recordData);
     }
 
-    // Update state and persistence
+    // Update state and localStorage immediately
     setRecords(updatedRecords);
     localStorage.setItem('dentalRecords', JSON.stringify(updatedRecords));
+
+    // Save to MongoDB in background
+    try {
+      if (isEdit) {
+        await axios.put(`/api/records/${recordData.id}`, recordData);
+      } else {
+        await axios.post('/api/records', recordData);
+      }
+      setDbStatus((prev) => ({
+        ...prev,
+        connected: true,
+        count: isEdit ? prev.count : prev.count + 1,
+      }));
+    } catch (err) {
+      console.warn('Lỗi lưu MongoDB (dữ liệu đã lưu tạm vào bộ nhớ máy):', err);
+    }
 
     alert(`Lưu dữ liệu với tên ${formData.name} thành công`);
 
@@ -186,14 +250,23 @@ export default function App() {
     document.getElementById('dentalForm')?.scrollIntoView({ behavior: 'smooth' });
   }
 
-  function handleDeleteActiveRecord() {
+  async function handleDeleteActiveRecord() {
     if (activeEditIndex === -1) return;
-    const confirmDelete = window.confirm(`Bạn có chắc chắn muốn xóa hồ sơ của ${records[activeEditIndex].name}?`);
+    const targetRecord = records[activeEditIndex];
+    const confirmDelete = window.confirm(`Bạn có chắc chắn muốn xóa hồ sơ của ${targetRecord.name}?`);
     if (!confirmDelete) return;
 
     const filtered = records.filter((_, idx) => idx !== activeEditIndex);
     setRecords(filtered);
     localStorage.setItem('dentalRecords', JSON.stringify(filtered));
+
+    // Delete from MongoDB
+    try {
+      await axios.delete(`/api/records/${targetRecord.id}`);
+      setDbStatus((prev) => ({ ...prev, count: Math.max(0, prev.count - 1) }));
+    } catch (err) {
+      console.warn('Lỗi xóa trên MongoDB (đã xóa bộ nhớ cục bộ):', err);
+    }
 
     // Reset Form
     setActiveRecord(null);
@@ -206,7 +279,7 @@ export default function App() {
   }
 
   // ==========================================
-  // DUST FREE EXPORTS & LOCAL FILE HELPERS
+  // EXPORTS & LOCAL FILE HELPERS
   // ==========================================
   // 1. "Kết sổ cuối tháng" - Filter records of the current Month and download JSON
   function handleDownloadCurrentMonth() {
@@ -228,11 +301,11 @@ export default function App() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      
+
       const dd = String(today.getDate()).padStart(2, '0');
       const mm = String(today.getMonth() + 1).padStart(2, '0');
       const yyyy = today.getFullYear();
-      
+
       a.download = `DucHanh-${dd}-${mm}-${yyyy}.json`;
       document.body.appendChild(a);
       a.click();
@@ -244,8 +317,8 @@ export default function App() {
   }
 
   // 2. "Lưu và xóa dữ liệu" - full records backup and clear localStorage
-  function handleBackupAndClearAll() {
-    const confirmation = window.confirm('Bạn có chắc chắn muốn lưu dữ liệu và xóa hết dữ liệu hiện có?');
+  async function handleBackupAndClearAll() {
+    const confirmation = window.confirm('Bạn có chắc chắn muốn tải file backup và xóa dữ liệu trên hệ thống?');
     if (!confirmation) return;
 
     const today = new Date();
@@ -265,12 +338,23 @@ export default function App() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
-    // Clear and reset
+    // Prompt to clear MongoDB as well
+    const alsoClearMongo = window.confirm('Bạn có muốn xóa toàn bộ bản ghi trên cơ sở dữ liệu MongoDB luôn không?');
+    if (alsoClearMongo) {
+      try {
+        await axios.delete('/api/records');
+        setDbStatus((prev) => ({ ...prev, count: 0 }));
+      } catch (err) {
+        console.warn('Lỗi xóa trên MongoDB:', err);
+      }
+    }
+
+    // Clear and reset local
     localStorage.removeItem('dentalRecords');
     setRecords([]);
     setActiveRecord(null);
     setActiveEditIndex(-1);
-    alert('Hệ thống đã reset dữ liệu cục bộ thành công.');
+    alert('Hệ thống đã sao lưu và dọn dẹp dữ liệu thành công.');
   }
 
   // 3. "Tải dữ liệu file" - Select backup file and populate records
@@ -283,14 +367,34 @@ export default function App() {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = function (evt) {
+    reader.onload = async function (evt) {
       try {
         const textStr = evt.target?.result as string;
         const dataParsed = JSON.parse(textStr);
         if (Array.isArray(dataParsed)) {
           setRecords(dataParsed);
           localStorage.setItem('dentalRecords', JSON.stringify(dataParsed));
-          alert('Tải dữ liệu từ file backup thành công!');
+
+          // Offer to sync to MongoDB
+          const syncConfirm = window.confirm(
+            `Đã đọc ${dataParsed.length} hồ sơ từ file backup. Bạn có muốn đồng bộ ngay vào MongoDB không?`
+          );
+          if (syncConfirm) {
+            setIsLoading(true);
+            setLoadingText('Đang nạp dữ liệu file vào MongoDB...');
+            try {
+              await axios.post('/api/records/sync', dataParsed);
+              await fetchRecordsFromMongo();
+              alert('Đồng bộ file backup vào MongoDB thành công!');
+            } catch (syncErr) {
+              console.error('Lỗi sync MongoDB:', syncErr);
+              alert('Không thể nạp vào MongoDB, nhưng đã lưu trên trình duyệt.');
+            } finally {
+              setIsLoading(false);
+            }
+          } else {
+            alert('Tải dữ liệu từ file backup thành công!');
+          }
         } else {
           alert('Định dạng dữ liệu backup file không hợp lệ! Vui lòng chọn đúng file.');
         }
@@ -385,43 +489,41 @@ export default function App() {
   }
 
   // ==========================================
-  // CLOUD INTEGRATION & CLOUD RESTORING
+  // MONGODB INTEGRATION & CLOUD RESTORING
   // ==========================================
-  // 1. Handlers for sync Cloud download data
+  // 1. Handlers for sync Cloud download data from MongoDB
   async function handleDownloadFromCloud() {
-    const confirmation = window.confirm('Bạn có chắc chắn muốn tải dữ liệu từ cloud về không?');
+    const confirmation = window.confirm('Bạn có chắc chắn muốn tải dữ liệu mới nhất từ cơ sở dữ liệu MongoDB về không?');
     if (!confirmation) return;
 
     setIsLoading(true);
-    setLoadingText('Đang tải dữ liệu từ Cloud Database...');
+    setLoadingText('Đang tải dữ liệu từ MongoDB...');
 
     try {
-      const response = await fetch(
-        'https://script.google.com/macros/s/AKfycbzjXxdGVStI7qLNEvMXZNqipkd9MC6IUtJ66KdFY69Va-iELCrx0FUit0fhMYky-NHx/exec'
-      );
-      const dataStr = await response.text();
-      const loadedRecords = JSON.parse(dataStr);
+      const response = await axios.get('/api/records');
+      const loadedRecords = response.data;
 
       if (Array.isArray(loadedRecords)) {
         setRecords(loadedRecords);
         localStorage.setItem('dentalRecords', JSON.stringify(loadedRecords));
-        alert('Tải dữ liệu từ cơ sở dữ liệu cloud thành công!');
-        
+        setDbStatus({ connected: true, count: loadedRecords.length, database: 'duchanh' });
+        alert(`Tải thành công ${loadedRecords.length} hồ sơ từ MongoDB!`);
+
         // Form states reload
         setActiveRecord(null);
         setActiveEditIndex(-1);
       } else {
-        alert('Dữ liệu tải về từ Cloud có cấu trúc không phù hợp!');
+        alert('Dữ liệu tải về từ MongoDB có cấu trúc không phù hợp!');
       }
     } catch (err) {
-      console.error('Cloud Download error', err);
-      alert('Không thể kết nối đến máy chủ Cloud! Vui lòng thử lại sau.');
+      console.error('MongoDB Download error', err);
+      alert('Không thể kết nối đến máy chủ MongoDB! Vui lòng kiểm tra lại kết nối.');
     } finally {
       setIsLoading(false);
     }
   }
 
-  // 2. Hanlders for sync Cloud upload data
+  // 2. Handlers for sync Cloud upload data to MongoDB
   async function triggerCloudUploadFlow() {
     setIsCloudPassOpen(true);
     setCloudPassword('');
@@ -454,22 +556,39 @@ export default function App() {
 
   async function initiateCloudSyncPOST() {
     setIsLoading(true);
-    setLoadingText('Đang đồng bộ dữ liệu lên máy chủ cloud...');
+    setLoadingText('Đang đồng bộ dữ liệu lên MongoDB...');
 
     try {
-      const response = await fetch(
-        'https://script.google.com/macros/s/AKfycbzjXxdGVStI7qLNEvMXZNqipkd9MC6IUtJ66KdFY69Va-iELCrx0FUit0fhMYky-NHx/exec',
-        {
-          method: 'POST',
-          body: JSON.stringify(records, null, 2),
-        }
-      );
-      const textResult = await response.text();
-      console.log('Post cloud response text:', textResult);
-      alert('Đồng bộ lưu dữ liệu lên cơ sở dữ liệu cloud thành công!');
+      const response = await axios.post('/api/records/sync', records);
+      console.log('Post MongoDB response:', response.data);
+      setDbStatus((prev) => ({ ...prev, connected: true, count: records.length }));
+      alert(`Đồng bộ thành công ${records.length} hồ sơ lên MongoDB!`);
     } catch (err) {
-      console.error('Cloud sync err', err);
-      alert('Có lỗi xảy ra khi gửi dữ liệu lên Cloud!');
+      console.error('MongoDB sync err', err);
+      alert('Có lỗi xảy ra khi gửi dữ liệu lên MongoDB! Hãy chắc chắn MongoDB đang chạy.');
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  // 3. Quick 1-click import from DucHanh-27-08-2024.txt
+  async function handleImportDefaultData() {
+    const confirmation = window.confirm(
+      'Bạn có muốn nạp dữ liệu gốc từ file DucHanh-27-08-2024.txt (931 hồ sơ) vào MongoDB không?'
+    );
+    if (!confirmation) return;
+
+    setIsLoading(true);
+    setLoadingText('Đang nạp 931 hồ sơ gốc vào MongoDB...');
+
+    try {
+      const res = await axios.post('/api/records/import-default');
+      alert(res.data.message || 'Nạp dữ liệu vào MongoDB thành công!');
+      // Refresh
+      await fetchRecordsFromMongo(false);
+    } catch (err: any) {
+      console.error('Import default error:', err);
+      alert('Không thể nạp dữ liệu: ' + (err.response?.data?.error || err.message));
     } finally {
       setIsLoading(false);
     }
@@ -535,7 +654,6 @@ export default function App() {
 
   return (
     <div id="application_viewport" className="min-h-screen bg-[#b3cbcf] text-slate-800 font-sans selection:bg-teal-500 selection:text-white flex flex-col justify-between">
-      
       {/* Hidden Files Import Elements */}
       <input
         type="file"
@@ -574,13 +692,36 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-4.5 bg-white/75 backdrop-blur-xs p-2 px-4 rounded-xl border border-sky-100/90 shadow-inner w-full md:w-auto justify-between md:justify-end">
+          <div className="flex flex-wrap items-center gap-3 bg-white/75 backdrop-blur-xs p-2 px-4 rounded-xl border border-sky-100/90 shadow-inner w-full md:w-auto justify-between md:justify-end">
+            {/* MongoDB Connection Status Badge */}
+            <div
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer transition-all ${
+                dbStatus.connected
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+                  : 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100'
+              }`}
+              onClick={() => fetchRecordsFromMongo(true)}
+              title="Click để kiểm tra lại kết nối MongoDB"
+            >
+              <Database size={14} className={dbStatus.connected ? 'text-emerald-600' : 'text-amber-600'} />
+              <span>MongoDB:</span>
+              {dbStatus.connected ? (
+                <span className="flex items-center gap-1 font-bold">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                  {dbStatus.count} hồ sơ
+                </span>
+              ) : (
+                <span className="font-normal text-[11px]">Ngoại tuyến (Cache)</span>
+              )}
+            </div>
+
             <div className="flex flex-col text-right">
               <span id="clock" className="text-base md:text-lg font-black text-[#007bff] font-mono leading-none mb-1">
                 {clockStr || 'Đang tải giờ...'}
               </span>
-              <span className="text-[10px] text-slate-400 font-semibold tracking-wider uppercase">Giờ hệ thống thực tế</span>
+              <span className="text-[10px] text-slate-400 font-semibold tracking-wider uppercase">Giờ hệ thống</span>
             </div>
+
             <button
               id="logout_btn"
               onClick={handleLogout}
@@ -595,7 +736,6 @@ export default function App() {
 
       {/* Main Scaffold Operations Body */}
       <main className="max-w-7xl mx-auto w-full px-4 py-6 space-y-6 flex-1">
-        
         {/* Quick Operations toolbar */}
         <div className="bg-white rounded-2xl shadow-xs border border-slate-100 p-4 flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-2">
@@ -638,7 +778,7 @@ export default function App() {
               className="px-4.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs hover:shadow-md transition-all cursor-pointer flex items-center gap-1.5"
             >
               <Upload size={14} />
-              <span>Đồng bộ lên Cloud</span>
+              <span>Đồng bộ lên MongoDB</span>
             </button>
 
             <button
@@ -647,7 +787,7 @@ export default function App() {
               className="px-4.5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs hover:shadow-md transition-all cursor-pointer flex items-center gap-1.5"
             >
               <Download size={14} />
-              <span>Tải từ Cloud</span>
+              <span>Tải từ MongoDB</span>
             </button>
           </div>
         </div>
@@ -671,7 +811,7 @@ export default function App() {
         {/* Data Maintenance section inside page footer of elements */}
         <section className="bg-slate-100/70 rounded-2xl p-6 border border-slate-200/50 space-y-4">
           <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-            <FolderSync size={15} /> Công cụ quản trị cơ sở dữ liệu dự phòng
+            <FolderSync size={15} /> Công cụ quản trị cơ sở dữ liệu MongoDB & Dự phòng
           </h4>
           <div className="flex flex-wrap items-center gap-3">
             <button
@@ -700,9 +840,18 @@ export default function App() {
               <FileText size={13} />
               <span>Khôi phục từ file backup</span>
             </button>
+
+            <button
+              id="db_import_default_btn"
+              onClick={handleImportDefaultData}
+              className="py-2.5 px-4 bg-teal-50 hover:bg-teal-100 border border-teal-200/60 text-teal-700 font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ml-auto"
+              title="Nạp 931 hồ sơ bệnh nhân từ DucHanh-27-08-2024.txt vào MongoDB"
+            >
+              <Database size={13} className="text-teal-600" />
+              <span>Nạp dữ liệu gốc (931 hồ sơ)</span>
+            </button>
           </div>
         </section>
-
       </main>
 
       {/* Clean high contrast Copyright Footer */}
@@ -710,7 +859,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row items-center justify-between gap-4">
           <p>© Copyright 2026 Nha Khoa Đức Hạnh Bình Thuận. Bản quyền thuộc về KhoiTN.</p>
           <div className="flex items-center gap-3 text-slate-500">
-            <span>Thiết kế đáp ứng bởi KhoiTN</span>
+            <span>Phiên bản nâng cấp MongoDB 7.0</span>
             <span>•</span>
             <a href="https://facebook.com/nguyenkhoi2202" target="_blank" rel="noreferrer" className="text-teal-400 hover:underline">
               KhoiTN Profile
@@ -741,7 +890,7 @@ export default function App() {
             <div className="bg-slate-900 text-white p-4 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Lock size={18} className="text-teal-400" />
-                <h3 className="font-bold text-base tracking-tight">Xử lý bảo mật</h3>
+                <h3 className="font-bold text-base tracking-tight">Xác thực đồng bộ MongoDB</h3>
               </div>
               <button onClick={() => setIsCloudPassOpen(false)} className="text-slate-400 hover:text-white transition-colors cursor-pointer">
                 <X size={18} />
@@ -751,7 +900,7 @@ export default function App() {
             {/* Form */}
             <form onSubmit={handleCloudPassSubmit} className="p-6 space-y-4">
               <p className="text-xs text-slate-500 leading-relaxed">
-                Vui lòng nhập mật khẩu đồng bộ để thực hiện lưu trữ hoặc chuyển đổi dữ liệu lên Cloud Database an toàn.
+                Vui lòng nhập mật khẩu quản trị để thực hiện đồng bộ dữ liệu lên cơ sở dữ liệu MongoDB an toàn.
               </p>
 
               <div>
@@ -759,7 +908,7 @@ export default function App() {
                 <input
                   id="cloud_password_val"
                   type="password"
-                  placeholder="Nhập mật khẩu..."
+                  placeholder="Nhập mật khẩu (mặc định: 123)..."
                   value={cloudPassword}
                   onChange={(e) => setCloudPassword(e.target.value)}
                   required
@@ -788,7 +937,7 @@ export default function App() {
                   type="submit"
                   className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-lg transition-all cursor-pointer"
                 >
-                  Xác nhận
+                  Xác nhận đồng bộ
                 </button>
               </div>
             </form>
@@ -819,7 +968,6 @@ export default function App() {
         amount={qrAmount}
         addInfo={qrAddInfo}
       />
-
     </div>
   );
 }
