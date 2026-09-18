@@ -49,12 +49,21 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingText, setLoadingText] = useState('Đang xử lý...');
 
-  // 5. Database Status state
-  const [dbStatus, setDbStatus] = useState<{ connected: boolean; count: number; database: string }>({
+  // 5. Database Status state & Diagnostics
+  const [dbStatus, setDbStatus] = useState<{
+    connected: boolean;
+    count: number;
+    database: string;
+    reason?: string;
+    error?: string;
+    help?: string;
+    isVercel?: boolean;
+  }>({
     connected: false,
     count: 0,
     database: '',
   });
+  const [isDbDiagOpen, setIsDbDiagOpen] = useState(false);
 
   // 6. Cloud/MongoDB Save password modal states
   const [isCloudPassOpen, setIsCloudPassOpen] = useState(false);
@@ -115,30 +124,56 @@ export default function App() {
   async function fetchRecordsFromMongo(showSpinner = false) {
     if (showSpinner) {
       setIsLoading(true);
-      setLoadingText('Đang kết nối MongoDB...');
+      setLoadingText('Đang kiểm tra kết nối MongoDB...');
     }
 
     try {
       // Check MongoDB Health
       const healthRes = await axios.get('/api/health');
-      if (healthRes.data && healthRes.data.connected) {
+      const healthData = healthRes.data;
+
+      if (healthData && healthData.connected) {
         setDbStatus({
           connected: true,
-          count: healthRes.data.recordsCount || 0,
-          database: healthRes.data.database || 'duchanh',
+          count: healthData.recordsCount || 0,
+          database: healthData.database || 'duchanh',
+          isVercel: healthData.isVercel,
+        });
+
+        // Fetch records from MongoDB
+        const res = await axios.get('/api/records');
+        if (Array.isArray(res.data) && res.data.length > 0) {
+          setRecords(res.data);
+          localStorage.setItem('dentalRecords', JSON.stringify(res.data));
+          setDbStatus((prev) => ({ ...prev, connected: true, count: res.data.length }));
+        }
+      } else {
+        // Backend reached but DB not connected
+        setDbStatus({
+          connected: false,
+          count: 0,
+          database: '',
+          reason: healthData?.reason || 'NOT_CONNECTED',
+          error: healthData?.error || healthData?.message || 'Không thể kết nối đến MongoDB',
+          help: healthData?.help || 'Vui lòng kiểm tra lại cấu hình chuỗi kết nối MONGODB_URI.',
+          isVercel: healthData?.isVercel,
         });
       }
-
-      // Fetch records from MongoDB
-      const res = await axios.get('/api/records');
-      if (Array.isArray(res.data) && res.data.length > 0) {
-        setRecords(res.data);
-        localStorage.setItem('dentalRecords', JSON.stringify(res.data));
-        setDbStatus((prev) => ({ ...prev, connected: true, count: res.data.length }));
-      }
     } catch (err: any) {
-      console.warn('Không thể kết nối đến MongoDB API, dùng dữ liệu bộ nhớ cục bộ:', err.message);
-      setDbStatus({ connected: false, count: 0, database: '' });
+      console.warn('Không thể kết nối đến MongoDB API, dùng dữ liệu bộ nhớ cục bộ:', err);
+      const serverErr = err.response?.data;
+      setDbStatus({
+        connected: false,
+        count: 0,
+        database: '',
+        reason: serverErr?.reason || (err.response?.status === 404 ? 'ROUTE_NOT_FOUND' : 'NETWORK_ERROR'),
+        error: serverErr?.message || serverErr?.error || err.message || 'Lỗi mạng / Không thể gọi API',
+        help:
+          err.response?.status === 404
+            ? 'Endpoint /api/health trả về 404. Hãy đảm bảo bạn đã push thư mục api/ lên GitHub.'
+            : 'Vui lòng kiểm tra lại biến môi trường MONGODB_URI trên Vercel và quyền truy cập mạng của MongoDB Atlas.',
+        isVercel: true,
+      });
     } finally {
       if (showSpinner) {
         setIsLoading(false);
@@ -700,8 +735,8 @@ export default function App() {
                   ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
                   : 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100'
               }`}
-              onClick={() => fetchRecordsFromMongo(true)}
-              title="Click để kiểm tra lại kết nối MongoDB"
+              onClick={() => setIsDbDiagOpen(true)}
+              title="Click để xem trạng thái kết nối hoặc hướng dẫn khắc phục"
             >
               <Database size={14} className={dbStatus.connected ? 'text-emerald-600' : 'text-amber-600'} />
               <span>MongoDB:</span>
@@ -968,6 +1003,112 @@ export default function App() {
         amount={qrAmount}
         addInfo={qrAddInfo}
       />
+
+      {/* ==========================================
+          MODAL 5: MongoDB Diagnostics & Troubleshooting Modal
+          ========================================== */}
+      {isDbDiagOpen && (
+        <div id="db_diag_overlay" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-100 transform animate-scale-up">
+            {/* Header */}
+            <div className={`p-4 flex items-center justify-between text-white ${dbStatus.connected ? 'bg-teal-600' : 'bg-slate-900'}`}>
+              <div className="flex items-center gap-2">
+                <Database size={18} className={dbStatus.connected ? 'text-teal-200' : 'text-amber-400'} />
+                <h3 className="font-bold text-base tracking-tight">Trạng thái Cơ sở dữ liệu MongoDB</h3>
+              </div>
+              <button onClick={() => setIsDbDiagOpen(false)} className="text-slate-300 hover:text-white transition-colors cursor-pointer">
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+              {/* Status Box */}
+              <div className={`p-4 rounded-xl border flex items-start gap-3 ${
+                dbStatus.connected 
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+                  : 'bg-amber-50 border-amber-200 text-amber-900'
+              }`}>
+                {dbStatus.connected ? (
+                  <CheckCircle2 size={24} className="text-emerald-600 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertCircle size={24} className="text-amber-600 shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <h4 className="font-bold text-sm">
+                    {dbStatus.connected ? 'Đang kết nối trực tuyến thành công!' : 'Đang ở chế độ Ngoại tuyến (Cache)'}
+                  </h4>
+                  <p className="text-xs mt-1 leading-relaxed">
+                    {dbStatus.connected 
+                      ? `Hệ thống đang kết nối trực tiếp với MongoDB (${dbStatus.database || 'duchanh'}). Đang quản lý ${dbStatus.count} hồ sơ bệnh nhân.`
+                      : 'Ứng dụng đang đọc dữ liệu từ bộ nhớ tạm của trình duyệt (localStorage). Các thay đổi vẫn được lưu trên máy của bạn, nhưng chưa đồng bộ lên MongoDB.'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Troubleshooting details if offline */}
+              {!dbStatus.connected && (
+                <div className="space-y-3">
+                  {dbStatus.error && (
+                    <div className="bg-rose-50 border border-rose-200 rounded-xl p-3.5 text-xs text-rose-800 space-y-1">
+                      <span className="font-bold uppercase tracking-wider text-[10px] text-rose-600 block">Chi tiết lỗi phát hiện:</span>
+                      <p className="font-mono text-[11px] break-all bg-white/70 p-2 rounded border border-rose-100">{dbStatus.error}</p>
+                    </div>
+                  )}
+
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs space-y-3">
+                    <h5 className="font-bold text-slate-700 uppercase tracking-wider text-[11px]">
+                      🛠️ Hướng dẫn khắc phục nhanh khi chạy trên Vercel:
+                    </h5>
+                    <ol className="list-decimal list-inside space-y-2 text-slate-600 leading-relaxed">
+                      <li>
+                        <strong className="text-slate-800">Cấu hình biến môi trường trên Vercel:</strong>
+                        <p className="pl-4 text-slate-500 mt-0.5">
+                          Vào <a href="https://vercel.com/dashboard" target="_blank" rel="noreferrer" className="text-teal-600 underline font-semibold">Vercel Dashboard</a> &rarr; Chọn Project &rarr; <strong>Settings</strong> &rarr; <strong>Environment Variables</strong> &rarr; Thêm biến <code className="bg-slate-200 px-1 py-0.5 rounded font-mono text-slate-800 font-bold">MONGODB_URI</code> với giá trị kết nối MongoDB Atlas (ví dụ: <code className="bg-slate-200 px-1 py-0.5 rounded font-mono text-slate-800">mongodb+srv://...</code>).
+                        </p>
+                      </li>
+                      <li>
+                        <strong className="text-slate-800">Mở quyền truy cập IP trên MongoDB Atlas:</strong>
+                        <p className="pl-4 text-slate-500 mt-0.5">
+                          Vào <a href="https://cloud.mongodb.com" target="_blank" rel="noreferrer" className="text-teal-600 underline font-semibold">MongoDB Atlas</a> &rarr; Mục <strong>Network Access</strong> &rarr; Chọn <strong>Add IP Address</strong> &rarr; Chọn <strong>Allow Access from Anywhere (0.0.0.0/0)</strong> &rarr; Bấm <strong>Confirm</strong>.
+                        </p>
+                      </li>
+                      <li>
+                        <strong className="text-slate-800">Bấm Redeploy trên Vercel:</strong>
+                        <p className="pl-4 text-slate-500 mt-0.5">
+                          Sau khi thêm biến môi trường, vào tab <strong>Deployments</strong> trên Vercel &rarr; Bấm dấu ba chấm <strong>(...)</strong> ở bản build mới nhất &rarr; Chọn <strong>Redeploy</strong> để biến môi trường có hiệu lực!
+                        </p>
+                      </li>
+                    </ol>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => {
+                  fetchRecordsFromMongo(true);
+                }}
+                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+              >
+                <RefreshCw size={13} />
+                <span>Kiểm tra lại kết nối</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsDbDiagOpen(false)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

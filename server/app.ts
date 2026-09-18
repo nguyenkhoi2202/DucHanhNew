@@ -3,7 +3,7 @@ import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getDb, getRecordsCollection } from './db';
+import { getDb, getRecordsCollection, checkMongoStatus } from './db';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,25 +15,18 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Health Check & DB Status
-app.get('/api/health', async (_req: Request, res: Response) => {
-  try {
-    const db = await getDb();
-    const count = await db.collection('records').countDocuments();
-    res.json({
-      status: 'ok',
-      connected: true,
-      database: db.databaseName,
-      recordsCount: count,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error: any) {
-    res.status(500).json({
-      status: 'error',
-      connected: false,
-      error: error.message || 'Database connection error',
-    });
-  }
-});
+const handleHealth = async (_req: Request, res: Response) => {
+  const status = await checkMongoStatus();
+  res.json({
+    status: status.connected ? 'ok' : 'error',
+    ...status,
+    isVercel: !!process.env.VERCEL,
+    timestamp: new Date().toISOString(),
+  });
+};
+
+app.get('/api/health', handleHealth);
+app.get('/health', handleHealth);
 
 // GET /api/records - Retrieve all records
 app.get('/api/records', async (_req: Request, res: Response) => {
@@ -143,8 +136,8 @@ app.delete('/api/records', async (_req: Request, res: Response) => {
   }
 });
 
-// POST /api/records/sync - Bulk Sync records (Replaces Cloud POST)
-app.post('/api/records/sync', async (req: Request, res: Response) => {
+// Sync handler
+const handleSync = async (req: Request, res: Response) => {
   try {
     const records = req.body;
     if (!Array.isArray(records)) {
@@ -185,10 +178,13 @@ app.post('/api/records/sync', async (req: Request, res: Response) => {
     console.error('Error syncing records:', error);
     res.status(500).json({ error: error.message || 'Failed to sync records' });
   }
-});
+};
 
-// POST /api/records/import-default - Import DucHanh-27-08-2024.txt
-app.post('/api/records/import-default', async (_req: Request, res: Response) => {
+app.post('/api/records/sync', handleSync);
+app.post('/api/sync', handleSync);
+
+// Import default handler
+const handleImportDefault = async (_req: Request, res: Response) => {
   try {
     const candidatePaths = [
       path.resolve(__dirname, '../data/DucHanh-27-08-2024.txt'),
@@ -238,7 +234,10 @@ app.post('/api/records/import-default', async (_req: Request, res: Response) => 
     console.error('Error importing default data:', error);
     res.status(500).json({ error: error.message || 'Failed to import default data' });
   }
-});
+};
+
+app.post('/api/records/import-default', handleImportDefault);
+app.post('/api/import-default', handleImportDefault);
 
 // Serve frontend static build files if dist exists (Production / Docker mode)
 const distPath = path.resolve(__dirname, '../dist');

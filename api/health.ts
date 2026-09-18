@@ -10,8 +10,7 @@ export default async function handler(req: any, res: any) {
 
   const status = await checkMongoStatus();
   return res.status(200).json({
-    name: 'Nha Khoa Duc Hanh API',
-    status: status.connected ? 'online' : 'offline',
+    status: status.connected ? 'ok' : 'error',
     ...status,
     isVercel: !!process.env.VERCEL,
     timestamp: new Date().toISOString(),
